@@ -1,0 +1,51 @@
+[project]
+name = "telegram-stock-summarizer"
+version = "0.1.0"
+description = "AI-powered Telegram stock discussion monitor and report generator."
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.13",
+  "apscheduler>=3.10",
+  "asyncpg>=0.29",
+  "aiosqlite>=0.20",
+  "fastapi>=0.115",
+  "google-genai>=1.0",
+  "orjson>=3.10",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "python-dotenv>=1.0",
+  "python-telegram-bot>=21.4",
+  "sqlalchemy[asyncio]>=2.0",
+  "structlog>=24.4",
+  "telethon>=1.36",
+  "tenacity>=8.5",
+  "uvicorn[standard]>=0.30",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["B008"]
