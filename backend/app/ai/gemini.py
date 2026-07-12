@@ -19,6 +19,7 @@ class GeminiProvider(LLMProvider):
         self.model = settings.gemini_model
         self.timeout_seconds = settings.ai_request_timeout_seconds
         self._client = self._build_client(settings.gemini_api_key)
+        self._quota_blocked_until = 0.0
 
     @staticmethod
     def _build_client(api_key: str | None) -> Any:
@@ -30,7 +31,11 @@ class GeminiProvider(LLMProvider):
 
     async def summarize(self, cluster: MessageCluster) -> SummaryResult:
         prompt = build_summarization_prompt(cluster)
-        text = await self._generate(prompt, operation="summarize", ticker=cluster.ticker)
+        try:
+            text = await self._generate(prompt, operation="summarize", ticker=cluster.ticker)
+        except (QuotaExceededError, RuntimeError):
+            logger.warning("gemini_summary_fallback", ticker=cluster.ticker)
+            return _fallback_summary(cluster)
         try:
             return parse_json_model(text, SummaryResult)
         except ValueError:
@@ -43,7 +48,11 @@ class GeminiProvider(LLMProvider):
 
     async def analyze(self, summary: SummaryResult) -> AnalysisResult:
         prompt = build_analysis_prompt(summary)
-        text = await self._generate(prompt, operation="analyze", ticker=summary.ticker)
+        try:
+            text = await self._generate(prompt, operation="analyze", ticker=summary.ticker)
+        except (QuotaExceededError, RuntimeError):
+            logger.warning("gemini_analysis_fallback", ticker=summary.ticker)
+            return _fallback_analysis(summary)
         try:
             return parse_json_model(text, AnalysisResult)
         except ValueError:
@@ -61,6 +70,9 @@ class GeminiProvider(LLMProvider):
         reraise=True,
     )
     async def _generate(self, prompt: str, *, operation: str, ticker: str) -> str:
+        if time.time() < self._quota_blocked_until:
+            raise QuotaExceededError("Gemini quota is temporarily exhausted")
+
         start = time.perf_counter()
         try:
             response = await asyncio.wait_for(
@@ -72,6 +84,10 @@ class GeminiProvider(LLMProvider):
                 timeout=self.timeout_seconds,
             )
         except Exception as exc:
+            if _is_quota_error(exc):
+                self._quota_blocked_until = time.time() + 70
+                logger.warning("gemini_quota_exhausted", operation=operation, ticker=ticker)
+                raise QuotaExceededError("Gemini quota exhausted") from exc
             logger.exception("gemini_request_failed", operation=operation, ticker=ticker)
             raise RuntimeError("Gemini request failed") from exc
 
@@ -123,3 +139,15 @@ def _fallback_analysis(summary: SummaryResult) -> AnalysisResult:
         recommendation="Review the source Telegram messages before taking action.",
         disclaimer="Not financial advice.",
     )
+
+
+class QuotaExceededError(RuntimeError):
+    pass
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 429:
+        return True
+    text = str(exc)
+    return "RESOURCE_EXHAUSTED" in text or "quota" in text.lower()
